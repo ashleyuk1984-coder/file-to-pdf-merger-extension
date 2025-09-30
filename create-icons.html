@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Icon Generator</title>
+</head>
+<body>
+    <h2>Extension Icon Generator</h2>
+    <p>This will generate placeholder icons for the extension.</p>
+    
+    <canvas id="canvas" width="128" height="128" style="border: 1px solid #ccc;"></canvas>
+    <br><br>
+    
+    <button onclick="generateIcons()">Generate All Icons</button>
+    <div id="downloads"></div>
+
+    <script>
+        function generateIcons() {
+            const sizes = [16, 32, 48, 128];
+            const downloads = document.getElementById('downloads');
+            downloads.innerHTML = '';
+            
+            sizes.forEach(size => {
+                const canvas = document.createElement('canvas');
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                
+                // Create gradient background (purple theme)
+                const gradient = ctx.createLinearGradient(0, 0, size, size);
+                gradient.addColorStop(0, '#9333ea'); // purple-600
+                gradient.addColorStop(1, '#ec4899'); // pink-500
+                
+                // Fill background
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, size, size);
+                
+                // Add border radius effect by clipping
+                ctx.globalCompositeOperation = 'destination-in';
+                ctx.beginPath();
+                ctx.roundRect(0, 0, size, size, size * 0.15);
+                ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+                
+                // Add document icon (simple white rectangle)
+                const iconSize = size * 0.6;
+                const x = (size - iconSize) / 2;
+                const y = (size - iconSize) / 2;
+                
+                ctx.fillStyle = 'white';
+                ctx.fillRect(x, y, iconSize, iconSize * 0.8);
+                
+                // Add folded corner
+                const cornerSize = iconSize * 0.2;
+                ctx.fillStyle = '#f1f5f9'; // slightly gray
+                ctx.beginPath();
+                ctx.moveTo(x + iconSize - cornerSize, y);
+                ctx.lineTo(x + iconSize, y + cornerSize);
+                ctx.lineTo(x + iconSize - cornerSize, y + cornerSize);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Add horizontal lines to represent text
+                ctx.fillStyle = '#64748b'; // slate-500
+                const lineHeight = size * 0.04;
+                const lineY = y + iconSize * 0.3;
+                
+                for (let i = 0; i < 3; i++) {
+                    ctx.fillRect(x + iconSize * 0.15, lineY + i * lineHeight * 1.5, iconSize * 0.6, lineHeight);
+                }
+                
+                // Create download link
+                const link = document.createElement('a');
+                link.download = `icon-${size}.png`;
+                link.href = canvas.toDataURL();
+                link.textContent = `Download icon-${size}.png`;
+                link.style.display = 'block';
+                link.style.marginBottom = '10px';
+                downloads.appendChild(link);
+                
+                // Auto-click to download
+                link.click();
+            });
+        }
+        
+        // Polyfill for roundRect if not supported
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radii) {
+                this.beginPath();
+                this.moveTo(x + radii, y);
+                this.lineTo(x + width - radii, y);
+                this.quadraticCurveTo(x + width, y, x + width, y + radii);
+                this.lineTo(x + width, y + height - radii);
+                this.quadraticCurveTo(x + width, y + height, x + width - radii, y + height);
+                this.lineTo(x + radii, y + height);
+                this.quadraticCurveTo(x, y + height, x, y + height - radii);
+                this.lineTo(x, y + radii);
+                this.quadraticCurveTo(x, y, x + radii, y);
+                this.closePath();
+            };
+        }
+    </script>
+</body>
+</html>
