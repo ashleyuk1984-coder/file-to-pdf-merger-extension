@@ -133,8 +133,11 @@ class PDFMergerExtension {
     traverseFileTree(item, files, path = '') {
         if (item.isFile) {
             item.file((file) => {
-                file.fullPath = path + file.name;
-                files.push(file);
+                // Only add actual files, not directories
+                if (file.size > 0 || file.type !== '') {
+                    file.fullPath = path + file.name;
+                    files.push(file);
+                }
             });
         } else if (item.isDirectory) {
             const dirReader = item.createReader();
@@ -259,15 +262,182 @@ class PDFMergerExtension {
         const insertionZone = document.createElement('div');
         insertionZone.className = 'insertion-zone';
         insertionZone.dataset.insertionIndex = insertionIndex;
+        
+        // Add insertion zone drag listeners
+        insertionZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            
+            if (this.draggedElement) {
+                insertionZone.classList.add('insertion-zone-active');
+                // Remove active class from other insertion zones
+                document.querySelectorAll('.insertion-zone').forEach(zone => {
+                    if (zone !== insertionZone) {
+                        zone.classList.remove('insertion-zone-active');
+                    }
+                });
+            }
+        });
+        
+        insertionZone.addEventListener('dragleave', (e) => {
+            // Use a small delay to prevent flickering when cursor moves between child elements
+            setTimeout(() => {
+                if (!insertionZone.matches(':hover')) {
+                    insertionZone.classList.remove('insertion-zone-active');
+                }
+            }, 10);
+        });
+        
+        insertionZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            insertionZone.classList.remove('insertion-zone-active');
+            
+            if (this.draggedElement) {
+                const insertIndex = parseInt(insertionZone.dataset.insertionIndex);
+                this.insertFileAtPosition(this.draggedElement, insertIndex);
+            }
+        });
+        
         return insertionZone;
+    }
+    
+    insertFileAtPosition(draggedElement, insertionIndex) {
+        const draggedIndex = parseInt(draggedElement.dataset.fileIndex);
+        
+        // Don't do anything if dropping in the same position
+        if (insertionIndex === draggedIndex || insertionIndex === draggedIndex + 1) {
+            return;
+        }
+        
+        // Remove the file from its current position
+        const draggedFile = this.selectedFiles[draggedIndex];
+        this.selectedFiles.splice(draggedIndex, 1);
+        
+        // Calculate the new insertion index after removal
+        let newInsertionIndex = insertionIndex;
+        if (draggedIndex < insertionIndex) {
+            newInsertionIndex--;
+        }
+        
+        // Insert the file at the new position
+        this.selectedFiles.splice(newInsertionIndex, 0, draggedFile);
+        
+        // Update the file list immediately
+        this.displayFileList();
+        
+        // Add a subtle highlight to the moved item
+        setTimeout(() => {
+            const fileItems = this.fileItems.querySelectorAll('.file-item-enhanced');
+            const movedItem = fileItems[newInsertionIndex];
+            if (movedItem) {
+                movedItem.style.borderColor = '#a855f7'; // purple-500
+                setTimeout(() => {
+                    movedItem.style.borderColor = '';
+                }, 600);
+            }
+        }, 50);
+    }
+    
+    replaceFilePosition(draggedElement, targetElement) {
+        const draggedIndex = parseInt(draggedElement.dataset.fileIndex);
+        const targetIndex = parseInt(targetElement.dataset.fileIndex);
+        
+        // Swap the files in the array
+        const temp = this.selectedFiles[draggedIndex];
+        this.selectedFiles[draggedIndex] = this.selectedFiles[targetIndex];
+        this.selectedFiles[targetIndex] = temp;
+        
+        // Update the file list immediately
+        this.displayFileList();
+        
+        // Add subtle highlight to both swapped items
+        setTimeout(() => {
+            const fileItems = this.fileItems.querySelectorAll('.file-item-enhanced');
+            [draggedIndex, targetIndex].forEach(index => {
+                const item = fileItems[index];
+                if (item) {
+                    item.style.borderColor = '#a855f7'; // purple-500
+                    setTimeout(() => {
+                        item.style.borderColor = '';
+                    }, 600);
+                }
+            });
+        }, 50);
     }
 
     addDragListeners(fileItem) {
-        // TODO: Implement from original webapp
+        fileItem.addEventListener('dragstart', (e) => {
+            this.draggedElement = fileItem;
+            
+            // Add dragging styles to original element
+            fileItem.classList.remove('file-item-enhanced');
+            fileItem.classList.add('file-item-dragging');
+            this.fileItems.classList.add('dragging');
+            
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', fileItem.outerHTML);
+            
+            // Show insertion zones when dragging starts
+            document.querySelectorAll('.insertion-zone').forEach(zone => {
+                zone.style.opacity = '0.3';
+            });
+        });
+        
+        fileItem.addEventListener('dragend', () => {
+            if (this.draggedElement) {
+                this.draggedElement.classList.remove('file-item-dragging');
+                this.draggedElement.classList.add('file-item-enhanced');
+                this.draggedElement = null;
+            }
+            
+            // Clean up all drag states
+            this.fileItems.classList.remove('dragging');
+            document.querySelectorAll('.insertion-zone').forEach(zone => {
+                zone.classList.remove('insertion-zone-active');
+                zone.style.opacity = '';
+            });
+            document.querySelectorAll('.file-item-enhanced').forEach(item => {
+                item.classList.remove('file-item-drag-over', 'file-item-dragging');
+            });
+        });
     }
 
     addDropListeners(fileItem) {
-        // TODO: Implement from original webapp
+        let dragCounter = 0;
+        
+        fileItem.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            
+            if (this.draggedElement && this.draggedElement !== fileItem) {
+                fileItem.classList.add('file-item-drag-over');
+            }
+        });
+        
+        fileItem.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        });
+        
+        fileItem.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            
+            // Only remove drag-over styling if we're truly leaving the element
+            if (dragCounter === 0) {
+                fileItem.classList.remove('file-item-drag-over');
+            }
+        });
+        
+        fileItem.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            fileItem.classList.remove('file-item-drag-over');
+            
+            if (this.draggedElement && this.draggedElement !== fileItem) {
+                this.replaceFilePosition(this.draggedElement, fileItem);
+            }
+        });
     }
 
     processFiles() {
@@ -334,25 +504,46 @@ class PDFMergerExtension {
             
             // Add title
             ctx.fillStyle = '#1e293b'; // slate-800
-            ctx.font = 'bold 24px Arial';
-            ctx.fillText('Merged PDF Document', 50, 80);
+            ctx.font = 'bold 28px Arial';
+            ctx.fillText('File Processing Report', 50, 80);
             
-            // Add file list
-            ctx.font = '16px Arial';
+            // Add subtitle
+            ctx.font = '18px Arial';
+            ctx.fillStyle = '#64748b'; // slate-500
+            ctx.fillText('Extension Demo - Files Ready for PDF Conversion', 50, 110);
+            
+            // Add file list header
+            ctx.font = 'bold 16px Arial';
             ctx.fillStyle = '#475569'; // slate-600
-            ctx.fillText('Files processed:', 50, 140);
+            ctx.fillText(`${this.selectedFiles.length} Files Selected:`, 50, 160);
             
-            let yPos = 180;
+            // Add files with better formatting
+            ctx.font = '14px Arial';
+            let yPos = 200;
             this.selectedFiles.forEach((file, index) => {
-                ctx.fillText(`${index + 1}. ${file.name} (${this.formatFileSize(file.size)})`, 70, yPos);
-                yPos += 30;
+                ctx.fillStyle = '#374151'; // slate-700
+                const displayName = file.fullPath || file.name;
+                const text = `${index + 1}. ${displayName}`;
+                ctx.fillText(text, 70, yPos);
+                
+                // Add file size on same line
+                ctx.fillStyle = '#9ca3af'; // gray-400
+                const sizeText = `(${this.formatFileSize(file.size)})`;
+                const nameWidth = ctx.measureText(text).width;
+                ctx.fillText(sizeText, 70 + nameWidth + 10, yPos);
+                
+                yPos += 25;
             });
             
             // Add footer
             ctx.fillStyle = '#9333ea'; // purple-600
-            ctx.font = '14px Arial';
-            ctx.fillText('Generated by File to PDF Merger Extension', 50, canvas.height - 50);
-            ctx.fillText(`Created on: ${new Date().toLocaleString()}`, 50, canvas.height - 30);
+            ctx.font = '12px Arial';
+            ctx.fillText('Generated by File to PDF Merger Extension (Demo Mode)', 50, canvas.height - 60);
+            ctx.fillText(`Created: ${new Date().toLocaleString()}`, 50, canvas.height - 40);
+            
+            ctx.fillStyle = '#64748b'; // slate-500
+            ctx.font = '11px Arial';
+            ctx.fillText('Note: This is a preview image. Full PDF functionality requires PDF-lib integration.', 50, canvas.height - 20);
             
             // Convert canvas to PDF-like data URL
             const imageData = canvas.toDataURL('image/png');
@@ -360,7 +551,7 @@ class PDFMergerExtension {
             // For now, we'll use the image data as our "PDF"
             // In a full implementation, you'd use PDF-lib or jsPDF here
             this.currentPDFData = imageData;
-            this.currentPDFFilename = `merged-files-${Date.now()}.pdf`;
+            this.currentPDFFilename = `merged-files-${Date.now()}.png`; // Use correct extension for now
             
             this.showSuccess(this.currentPDFFilename);
             
