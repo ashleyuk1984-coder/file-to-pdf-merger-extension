@@ -110,15 +110,21 @@ class PDFMergerExtension {
             const item = items[i];
             if (item.kind === 'file') {
                 const entry = item.webkitGetAsEntry();
-                if (entry) {
-                    this.traverseFileTree(entry, files);
+                if (entry && entry.isDirectory) {
+                    // For directory drops, traverse the contents but not the folder itself
+                    this.traverseFileTree(entry, files, '');
+                } else if (entry && entry.isFile) {
+                    // For file drops, add the file directly
+                    this.traverseFileTree(entry, files, '');
                 }
             }
         }
 
-        // Also handle regular files array as fallback
+        // Also handle regular files array as fallback (but filter out directories)
         if (files.length === 0 && event.dataTransfer.files.length > 0) {
-            const regularFiles = Array.from(event.dataTransfer.files);
+            const regularFiles = Array.from(event.dataTransfer.files).filter(f => 
+                f.type !== '' || f.size > 0 // Only actual files, not directories
+            );
             files.push(...regularFiles);
         }
 
@@ -127,14 +133,15 @@ class PDFMergerExtension {
             if (files.length > 0) {
                 this.handleFileSelect(files);
             }
-        }, 200);
+        }, 300);
     }
     
     traverseFileTree(item, files, path = '') {
         if (item.isFile) {
             item.file((file) => {
-                // Only add actual files, not directories
-                if (file.size > 0 || file.type !== '') {
+                // Only add actual files with content or known file types
+                // Also filter out hidden files and system files
+                if (this.isValidFile(file)) {
                     file.fullPath = path + file.name;
                     files.push(file);
                 }
@@ -148,15 +155,41 @@ class PDFMergerExtension {
             });
         }
     }
+    
+    isValidFile(file) {
+        // Debug logging
+        console.log(`Checking file: "${file.name}", size: ${file.size}, type: "${file.type}", lastModified: ${file.lastModified}`);
+        
+        // Filter out directories, hidden files, and system files
+        if (!file.name || file.name.startsWith('.') || file.name.startsWith('~')) {
+            console.log(`  -> Rejected: hidden or system file`);
+            return false;
+        }
+        
+        // Must have either a file size > 0 OR a recognizable file type
+        const hasContent = file.size > 0;
+        const hasFileType = file.type && file.type !== '';
+        const hasFileExtension = file.name.includes('.') && file.name.split('.').pop().length > 0;
+        
+        const isValid = hasContent || hasFileType || hasFileExtension;
+        console.log(`  -> ${isValid ? 'ACCEPTED' : 'REJECTED'}: content=${hasContent}, type=${hasFileType}, extension=${hasFileExtension}`);
+        
+        // Accept files that have content, type, or extension
+        return isValid;
+    }
 
     handleFileSelect(files) {
-        this.selectedFiles = Array.from(files);
+        // Apply additional filtering to remove any directories that got through
+        const filteredFiles = Array.from(files).filter(file => this.isValidFile(file));
+        
+        this.selectedFiles = filteredFiles;
         
         if (this.selectedFiles.length === 0) {
-            this.showError('No files selected. Please select files to process.');
+            this.showError('No valid files selected. Please select files to process.');
             return;
         }
 
+        console.log(`Selected ${this.selectedFiles.length} files:`, this.selectedFiles.map(f => f.name));
         this.displayFileList();
     }
 
@@ -505,12 +538,17 @@ class PDFMergerExtension {
             // Add title
             ctx.fillStyle = '#1e293b'; // slate-800
             ctx.font = 'bold 28px Arial';
-            ctx.fillText('File Processing Report', 50, 80);
+            ctx.fillText('DEMO: File List Preview', 50, 80);
             
             // Add subtitle
             ctx.font = '18px Arial';
+            ctx.fillStyle = '#dc2626'; // red-600
+            ctx.fillText('⚠️ This is a placeholder - not actual PDF content', 50, 110);
+            
+            // Add explanation
+            ctx.font = '14px Arial';
             ctx.fillStyle = '#64748b'; // slate-500
-            ctx.fillText('Extension Demo - Files Ready for PDF Conversion', 50, 110);
+            ctx.fillText('Full PDF merging requires PDF-lib integration (coming soon)', 50, 135);
             
             // Add file list header
             ctx.font = 'bold 16px Arial';
