@@ -555,6 +555,14 @@ class PDFMergerExtension {
             case 'txt':
                 await this.addTextToPDF(pdfDoc, file);
                 break;
+            case 'docx':
+            case 'doc':
+                await this.addWordDocToPDF(pdfDoc, file);
+                break;
+            case 'eml':
+            case 'msg':
+                await this.addEmailToPDF(pdfDoc, file);
+                break;
             default:
                 // For other file types, create an info page
                 await this.addInfoPageToPDF(pdfDoc, file);
@@ -772,6 +780,282 @@ class PDFMergerExtension {
             size: 12,
             color: PDFLib.rgb(0.6, 0.3, 0.3),
         });
+    }
+    
+    async addWordDocToPDF(pdfDoc, file) {
+        try {
+            // Check if mammoth is available
+            if (typeof mammoth === 'undefined') {
+                throw new Error('Mammoth library not loaded');
+            }
+            
+            const arrayBuffer = await file.arrayBuffer();
+            
+            // Convert Word document to HTML using mammoth
+            const result = await mammoth.convertToHtml({ arrayBuffer });
+            const html = result.value;
+            
+            // Create a temporary div to parse the HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // Add pages for the Word document content
+            await this.addHTMLContentToPDF(pdfDoc, tempDiv, file.name);
+            
+            // Log any conversion warnings
+            if (result.messages.length > 0) {
+                console.warn('Word document conversion warnings:', result.messages);
+            }
+            
+        } catch (error) {
+            console.error('Error processing Word document:', error);
+            // Fallback to info page if conversion fails
+            await this.addInfoPageToPDF(pdfDoc, file);
+        }
+    }
+    
+    async addHTMLContentToPDF(pdfDoc, htmlElement, filename) {
+        let page = pdfDoc.addPage();
+        const { width, height } = page.getSize();
+        const margin = 50;
+        const maxWidth = width - (margin * 2);
+        let yPosition = height - margin;
+        const lineHeight = 14;
+        const fontSize = 12;
+        
+        // Add document title
+        page.drawText(`Document: ${filename}`, {
+            x: margin,
+            y: yPosition,
+            size: 16,
+            color: PDFLib.rgb(0, 0, 0),
+        });
+        yPosition -= 30;
+        
+        // Process HTML content
+        const textContent = this.extractTextFromHTML(htmlElement);
+        const lines = this.wrapText(textContent, maxWidth, fontSize);
+        
+        for (const line of lines) {
+            // Check if we need a new page
+            if (yPosition < margin + lineHeight) {
+                page = pdfDoc.addPage();
+                yPosition = height - margin;
+            }
+            
+            page.drawText(line, {
+                x: margin,
+                y: yPosition,
+                size: fontSize,
+                color: PDFLib.rgb(0, 0, 0),
+            });
+            
+            yPosition -= lineHeight;
+        }
+    }
+    
+    extractTextFromHTML(element) {
+        let text = '';
+        
+        function traverse(node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                text += node.textContent;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const tagName = node.tagName.toLowerCase();
+                
+                // Add line breaks for block elements
+                if (['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'br'].includes(tagName)) {
+                    if (text && !text.endsWith('\n')) {
+                        text += '\n';
+                    }
+                }
+                
+                // Process child nodes
+                for (const child of node.childNodes) {
+                    traverse(child);
+                }
+                
+                // Add line breaks after block elements
+                if (['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
+                    if (text && !text.endsWith('\n')) {
+                        text += '\n';
+                    }
+                }
+            }
+        }
+        
+        traverse(element);
+        return text.trim();
+    }
+    
+    wrapText(text, maxWidth, fontSize) {
+        const lines = [];
+        const paragraphs = text.split('\n');
+        
+        for (const paragraph of paragraphs) {
+            if (!paragraph.trim()) {
+                lines.push(''); // Empty line
+                continue;
+            }
+            
+            const words = paragraph.split(/\s+/);
+            let currentLine = '';
+            
+            for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                // Rough width estimation
+                if (testLine.length * (fontSize * 0.6) < maxWidth) {
+                    currentLine = testLine;
+                } else {
+                    if (currentLine) lines.push(currentLine);
+                    currentLine = word;
+                }
+            }
+            
+            if (currentLine) lines.push(currentLine);
+        }
+        
+        return lines;
+    }
+    
+    async addEmailToPDF(pdfDoc, file) {
+        try {
+            const text = await file.text();
+            
+            // Parse email headers and content
+            const emailData = this.parseEmailContent(text);
+            
+            const page = pdfDoc.addPage();
+            const { width, height } = page.getSize();
+            const margin = 50;
+            const fontSize = 10;
+            const lineHeight = fontSize + 2;
+            let yPosition = height - margin;
+            
+            // Email title
+            page.drawText(`Email: ${file.name}`, {
+                x: margin,
+                y: yPosition,
+                size: 14,
+                color: PDFLib.rgb(0, 0, 0),
+            });
+            yPosition -= 25;
+            
+            // Email headers
+            const headerFields = ['from', 'to', 'subject', 'date'];
+            for (const field of headerFields) {
+                if (emailData.headers[field]) {
+                    const label = field.charAt(0).toUpperCase() + field.slice(1) + ':';
+                    page.drawText(label, {
+                        x: margin,
+                        y: yPosition,
+                        size: fontSize,
+                        color: PDFLib.rgb(0.2, 0.2, 0.2),
+                    });
+                    
+                    page.drawText(emailData.headers[field], {
+                        x: margin + 60,
+                        y: yPosition,
+                        size: fontSize,
+                        color: PDFLib.rgb(0, 0, 0),
+                    });
+                    yPosition -= lineHeight;
+                }
+            }
+            
+            yPosition -= 10; // Extra space before body
+            
+            // Email body
+            page.drawText('Message:', {
+                x: margin,
+                y: yPosition,
+                size: fontSize,
+                color: PDFLib.rgb(0.2, 0.2, 0.2),
+            });
+            yPosition -= lineHeight + 5;
+            
+            // Wrap and display email body
+            const bodyLines = this.wrapText(emailData.body, width - (margin * 2), fontSize);
+            for (const line of bodyLines.slice(0, 60)) { // Limit to 60 lines to fit on page
+                if (yPosition < margin) break;
+                
+                page.drawText(line, {
+                    x: margin,
+                    y: yPosition,
+                    size: fontSize,
+                    color: PDFLib.rgb(0, 0, 0),
+                });
+                yPosition -= lineHeight;
+            }
+            
+            if (bodyLines.length > 60) {
+                page.drawText('... (content truncated)', {
+                    x: margin,
+                    y: yPosition,
+                    size: fontSize,
+                    color: PDFLib.rgb(0.5, 0.5, 0.5),
+                });
+            }
+            
+        } catch (error) {
+            console.error('Error processing email:', error);
+            // Fallback to info page if parsing fails
+            await this.addInfoPageToPDF(pdfDoc, file);
+        }
+    }
+    
+    parseEmailContent(emailText) {
+        const headers = {};
+        let body = '';
+        
+        try {
+            const lines = emailText.split('\n');
+            let headersParsed = false;
+            let bodyLines = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                
+                if (!headersParsed) {
+                    if (line.trim() === '') {
+                        headersParsed = true;
+                        continue;
+                    }
+                    
+                    // Parse headers
+                    const match = line.match(/^([^:]+):\s*(.*)$/);
+                    if (match) {
+                        const field = match[1].toLowerCase().trim();
+                        let value = match[2].trim();
+                        
+                        // Handle multi-line headers
+                        let j = i + 1;
+                        while (j < lines.length && lines[j].match(/^\s/)) {
+                            value += ' ' + lines[j].trim();
+                            j++;
+                        }
+                        i = j - 1;
+                        
+                        headers[field] = value;
+                    }
+                } else {
+                    bodyLines.push(line);
+                }
+            }
+            
+            body = bodyLines.join('\n').trim();
+            
+            // Clean up body text (remove quoted-printable, etc.)
+            body = body.replace(/=[A-F0-9]{2}/g, '') // Remove quoted-printable
+                      .replace(/\s+/g, ' ')        // Normalize whitespace
+                      .trim();
+            
+        } catch (error) {
+            console.warn('Email parsing error:', error);
+            body = emailText; // Use raw text as fallback
+        }
+        
+        return { headers, body };
     }
     
     async addErrorPageToPDF(pdfDoc, file, errorMessage) {
