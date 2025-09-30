@@ -102,9 +102,47 @@ class PDFMergerExtension {
     }
 
     handleFileDrop(event) {
-        const files = Array.from(event.dataTransfer.files);
-        if (files.length > 0) {
-            this.handleFileSelect(files);
+        const items = event.dataTransfer.items;
+        const files = [];
+
+        // Handle both folder drop and file drop
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.kind === 'file') {
+                const entry = item.webkitGetAsEntry();
+                if (entry) {
+                    this.traverseFileTree(entry, files);
+                }
+            }
+        }
+
+        // Also handle regular files array as fallback
+        if (files.length === 0 && event.dataTransfer.files.length > 0) {
+            const regularFiles = Array.from(event.dataTransfer.files);
+            files.push(...regularFiles);
+        }
+
+        // Wait a bit for file traversal to complete
+        setTimeout(() => {
+            if (files.length > 0) {
+                this.handleFileSelect(files);
+            }
+        }, 200);
+    }
+    
+    traverseFileTree(item, files, path = '') {
+        if (item.isFile) {
+            item.file((file) => {
+                file.fullPath = path + file.name;
+                files.push(file);
+            });
+        } else if (item.isDirectory) {
+            const dirReader = item.createReader();
+            dirReader.readEntries((entries) => {
+                for (let i = 0; i < entries.length; i++) {
+                    this.traverseFileTree(entries[i], files, path + item.name + '/');
+                }
+            });
         }
     }
 
@@ -261,11 +299,16 @@ class PDFMergerExtension {
 
     // Create a basic PDF using simple text content
     simulatePDFCreation() {
+        const totalFiles = this.selectedFiles.length;
+        let currentFile = 0;
+        const progressIncrement = Math.floor(80 / Math.max(totalFiles, 1)); // 80% for file processing, 20% for finalization
         let progress = 10;
+        
         const interval = setInterval(() => {
-            progress += 20;
-            if (progress <= 90) {
-                this.updateProgress(progress, `Processing file ${Math.floor(progress/20)}...`);
+            if (currentFile < totalFiles) {
+                currentFile++;
+                progress += progressIncrement;
+                this.updateProgress(Math.min(progress, 90), `Processing file ${currentFile} of ${totalFiles}: ${this.selectedFiles[currentFile - 1].name}`);
             } else {
                 clearInterval(interval);
                 this.updateProgress(100, 'Finalizing PDF...');
@@ -274,7 +317,7 @@ class PDFMergerExtension {
                     this.generateBasicPDF();
                 }, 500);
             }
-        }, 300);
+        }, 400);
     }
     
     generateBasicPDF() {
@@ -317,7 +360,7 @@ class PDFMergerExtension {
             // For now, we'll use the image data as our "PDF"
             // In a full implementation, you'd use PDF-lib or jsPDF here
             this.currentPDFData = imageData;
-            this.currentPDFFilename = `merged-files-${Date.now()}.png`;
+            this.currentPDFFilename = `merged-files-${Date.now()}.pdf`;
             
             this.showSuccess(this.currentPDFFilename);
             

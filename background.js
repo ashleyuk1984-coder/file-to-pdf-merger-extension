@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.downloads.download({
       url: pdfData,
       filename: filename,
-      saveAs: true
+      saveAs: false  // Automatically download without save dialog
     }, (downloadId) => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError });
