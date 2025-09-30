@@ -157,12 +157,8 @@ class PDFMergerExtension {
     }
     
     isValidFile(file) {
-        // Debug logging
-        console.log(`Checking file: "${file.name}", size: ${file.size}, type: "${file.type}", lastModified: ${file.lastModified}`);
-        
         // Filter out directories, hidden files, and system files
         if (!file.name || file.name.startsWith('.') || file.name.startsWith('~')) {
-            console.log(`  -> Rejected: hidden or system file`);
             return false;
         }
         
@@ -171,11 +167,8 @@ class PDFMergerExtension {
         const hasFileType = file.type && file.type !== '';
         const hasFileExtension = file.name.includes('.') && file.name.split('.').pop().length > 0;
         
-        const isValid = hasContent || hasFileType || hasFileExtension;
-        console.log(`  -> ${isValid ? 'ACCEPTED' : 'REJECTED'}: content=${hasContent}, type=${hasFileType}, extension=${hasFileExtension}`);
-        
         // Accept files that have content, type, or extension
-        return isValid;
+        return hasContent || hasFileType || hasFileExtension;
     }
 
     handleFileSelect(files) {
@@ -189,7 +182,6 @@ class PDFMergerExtension {
             return;
         }
 
-        console.log(`Selected ${this.selectedFiles.length} files:`, this.selectedFiles.map(f => f.name));
         this.displayFileList();
     }
 
@@ -490,9 +482,17 @@ class PDFMergerExtension {
         try {
             this.updateProgress(10, 'Loading PDF library...');
             
-            // TODO: Import and use PDF-lib or similar client-side PDF library
-            // For now, just simulate the process
-            this.simulatePDFCreation();
+            // Check if PDF-lib is available
+            if (typeof PDFLib === 'undefined') {
+                throw new Error('PDF-lib library not loaded');
+            }
+            
+            this.updateProgress(20, 'Creating PDF document...');
+            
+            // Create a new PDF document
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            
+            await this.processPDFFiles(pdfDoc);
             
         } catch (error) {
             console.error('PDF creation failed:', error);
@@ -500,104 +500,306 @@ class PDFMergerExtension {
         }
     }
 
-    // Create a basic PDF using simple text content
-    simulatePDFCreation() {
+    async processPDFFiles(pdfDoc) {
         const totalFiles = this.selectedFiles.length;
-        let currentFile = 0;
-        const progressIncrement = Math.floor(80 / Math.max(totalFiles, 1)); // 80% for file processing, 20% for finalization
-        let progress = 10;
+        let processedFiles = 0;
         
-        const interval = setInterval(() => {
-            if (currentFile < totalFiles) {
-                currentFile++;
-                progress += progressIncrement;
-                this.updateProgress(Math.min(progress, 90), `Processing file ${currentFile} of ${totalFiles}: ${this.selectedFiles[currentFile - 1].name}`);
-            } else {
-                clearInterval(interval);
-                this.updateProgress(100, 'Finalizing PDF...');
-                setTimeout(() => {
-                    // Create basic PDF content
-                    this.generateBasicPDF();
-                }, 500);
+        for (const file of this.selectedFiles) {
+            processedFiles++;
+            const progressPercent = 20 + Math.floor((processedFiles / totalFiles) * 60); // 20-80%
+            this.updateProgress(progressPercent, `Processing ${file.name}...`);
+            
+            try {
+                await this.addFileToPDF(pdfDoc, file);
+            } catch (error) {
+                console.warn(`Failed to process ${file.name}:`, error);
+                // Continue with other files, but add an error page
+                await this.addErrorPageToPDF(pdfDoc, file, error.message);
             }
-        }, 400);
+        }
+        
+        this.updateProgress(90, 'Finalizing PDF...');
+        
+        // Serialize the PDF
+        const pdfBytes = await pdfDoc.save();
+        
+        // Convert to blob and create download
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        this.currentPDFData = URL.createObjectURL(blob);
+        this.currentPDFFilename = `merged-files-${Date.now()}.pdf`;
+        
+        this.updateProgress(100, 'PDF created successfully!');
+        
+        setTimeout(() => {
+            this.showSuccess(this.currentPDFFilename);
+        }, 500);
     }
     
-    generateBasicPDF() {
-        try {
-            // Create basic PDF content using canvas and data URL
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = 600;
-            canvas.height = 800;
-            
-            // White background
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Add title
-            ctx.fillStyle = '#1e293b'; // slate-800
-            ctx.font = 'bold 28px Arial';
-            ctx.fillText('DEMO: File List Preview', 50, 80);
-            
-            // Add subtitle
-            ctx.font = '18px Arial';
-            ctx.fillStyle = '#dc2626'; // red-600
-            ctx.fillText('⚠️ This is a placeholder - not actual PDF content', 50, 110);
-            
-            // Add explanation
-            ctx.font = '14px Arial';
-            ctx.fillStyle = '#64748b'; // slate-500
-            ctx.fillText('Full PDF merging requires PDF-lib integration (coming soon)', 50, 135);
-            
-            // Add file list header
-            ctx.font = 'bold 16px Arial';
-            ctx.fillStyle = '#475569'; // slate-600
-            ctx.fillText(`${this.selectedFiles.length} Files Selected:`, 50, 160);
-            
-            // Add files with better formatting
-            ctx.font = '14px Arial';
-            let yPos = 200;
-            this.selectedFiles.forEach((file, index) => {
-                ctx.fillStyle = '#374151'; // slate-700
-                const displayName = file.fullPath || file.name;
-                const text = `${index + 1}. ${displayName}`;
-                ctx.fillText(text, 70, yPos);
-                
-                // Add file size on same line
-                ctx.fillStyle = '#9ca3af'; // gray-400
-                const sizeText = `(${this.formatFileSize(file.size)})`;
-                const nameWidth = ctx.measureText(text).width;
-                ctx.fillText(sizeText, 70 + nameWidth + 10, yPos);
-                
-                yPos += 25;
-            });
-            
-            // Add footer
-            ctx.fillStyle = '#9333ea'; // purple-600
-            ctx.font = '12px Arial';
-            ctx.fillText('Generated by File to PDF Merger Extension (Demo Mode)', 50, canvas.height - 60);
-            ctx.fillText(`Created: ${new Date().toLocaleString()}`, 50, canvas.height - 40);
-            
-            ctx.fillStyle = '#64748b'; // slate-500
-            ctx.font = '11px Arial';
-            ctx.fillText('Note: This is a preview image. Full PDF functionality requires PDF-lib integration.', 50, canvas.height - 20);
-            
-            // Convert canvas to PDF-like data URL
-            const imageData = canvas.toDataURL('image/png');
-            
-            // For now, we'll use the image data as our "PDF"
-            // In a full implementation, you'd use PDF-lib or jsPDF here
-            this.currentPDFData = imageData;
-            this.currentPDFFilename = `merged-files-${Date.now()}.png`; // Use correct extension for now
-            
-            this.showSuccess(this.currentPDFFilename);
-            
-        } catch (error) {
-            console.error('PDF generation failed:', error);
-            this.showError('Failed to generate PDF: ' + error.message);
+    async addFileToPDF(pdfDoc, file) {
+        const extension = this.getFileExtension(file.name).toLowerCase();
+        
+        switch (extension) {
+            case 'pdf':
+                await this.addExistingPDFToPDF(pdfDoc, file);
+                break;
+            case 'jpg':
+            case 'jpeg':
+            case 'png':
+            case 'gif':
+            case 'bmp':
+            case 'webp':
+            case 'tiff':
+            case 'tif':
+                await this.addImageToPDF(pdfDoc, file);
+                break;
+            case 'txt':
+                await this.addTextToPDF(pdfDoc, file);
+                break;
+            default:
+                // For other file types, create an info page
+                await this.addInfoPageToPDF(pdfDoc, file);
+                break;
         }
     }
+    
+    async addExistingPDFToPDF(pdfDoc, file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const existingPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+        
+        // Copy all pages from the existing PDF
+        const pageIndices = existingPdf.getPageIndices();
+        const copiedPages = await pdfDoc.copyPages(existingPdf, pageIndices);
+        
+        copiedPages.forEach((page) => {
+            pdfDoc.addPage(page);
+        });
+    }
+    
+    async addImageToPDF(pdfDoc, file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const extension = this.getFileExtension(file.name).toLowerCase();
+        
+        let image;
+        if (extension === 'png') {
+            image = await pdfDoc.embedPng(arrayBuffer);
+        } else {
+            // For JPEG and other formats, try to embed as JPEG
+            try {
+                image = await pdfDoc.embedJpg(arrayBuffer);
+            } catch (error) {
+                // If JPEG embedding fails, convert via canvas first
+                image = await this.convertImageToPDF(pdfDoc, file);
+                return;
+            }
+        }
+        
+        const page = pdfDoc.addPage();
+        const { width: pageWidth, height: pageHeight } = page.getSize();
+        
+        // Scale image to fit page while maintaining aspect ratio
+        const imageAspectRatio = image.width / image.height;
+        const pageAspectRatio = pageWidth / pageHeight;
+        
+        let drawWidth, drawHeight;
+        if (imageAspectRatio > pageAspectRatio) {
+            // Image is wider relative to page
+            drawWidth = pageWidth - 40; // 20px margin on each side
+            drawHeight = drawWidth / imageAspectRatio;
+        } else {
+            // Image is taller relative to page
+            drawHeight = pageHeight - 40; // 20px margin on top/bottom
+            drawWidth = drawHeight * imageAspectRatio;
+        }
+        
+        const x = (pageWidth - drawWidth) / 2;
+        const y = (pageHeight - drawHeight) / 2;
+        
+        page.drawImage(image, {
+            x: x,
+            y: y,
+            width: drawWidth,
+            height: drawHeight,
+        });
+    }
+    
+    async convertImageToPDF(pdfDoc, file) {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = async () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                
+                // Convert to PNG data URL then to PDF
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64 = dataUrl.split(',')[1];
+                const arrayBuffer = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+                
+                const image = await pdfDoc.embedPng(arrayBuffer);
+                
+                const page = pdfDoc.addPage();
+                const { width: pageWidth, height: pageHeight } = page.getSize();
+                
+                const imageAspectRatio = image.width / image.height;
+                const pageAspectRatio = pageWidth / pageHeight;
+                
+                let drawWidth, drawHeight;
+                if (imageAspectRatio > pageAspectRatio) {
+                    drawWidth = pageWidth - 40;
+                    drawHeight = drawWidth / imageAspectRatio;
+                } else {
+                    drawHeight = pageHeight - 40;
+                    drawWidth = drawHeight * imageAspectRatio;
+                }
+                
+                const x = (pageWidth - drawWidth) / 2;
+                const y = (pageHeight - drawHeight) / 2;
+                
+                page.drawImage(image, { x, y, width: drawWidth, height: drawHeight });
+                resolve();
+            };
+            
+            img.src = URL.createObjectURL(file);
+        });
+    }
+    
+    async addTextToPDF(pdfDoc, file) {
+        const text = await file.text();
+        const page = pdfDoc.addPage();
+        const { width, height } = page.getSize();
+        const fontSize = 12;
+        const lineHeight = fontSize + 2;
+        const margin = 50;
+        const maxWidth = width - (margin * 2);
+        const maxHeight = height - (margin * 2);
+        
+        // Add title
+        page.drawText(`File: ${file.name}`, {
+            x: margin,
+            y: height - margin,
+            size: 14,
+            color: PDFLib.rgb(0, 0, 0),
+        });
+        
+        // Split text into lines that fit within the page width
+        const words = text.split(/\s+/);
+        const lines = [];
+        let currentLine = '';
+        
+        for (const word of words) {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            // Rough width estimation (more precise would use font metrics)
+            if (testLine.length * (fontSize * 0.6) < maxWidth) {
+                currentLine = testLine;
+            } else {
+                if (currentLine) lines.push(currentLine);
+                currentLine = word;
+            }
+        }
+        if (currentLine) lines.push(currentLine);
+        
+        // Draw lines
+        let y = height - margin - 30; // Start below title
+        for (const line of lines) {
+            if (y < margin) break; // Stop if we run out of space
+            
+            page.drawText(line, {
+                x: margin,
+                y: y,
+                size: fontSize,
+                color: PDFLib.rgb(0, 0, 0),
+            });
+            
+            y -= lineHeight;
+        }
+        
+        // If text was truncated, add note
+        if (y < margin && lines.length > 0) {
+            page.drawText('... (text truncated)', {
+                x: margin,
+                y: margin,
+                size: fontSize,
+                color: PDFLib.rgb(0.5, 0.5, 0.5),
+            });
+        }
+    }
+    
+    async addInfoPageToPDF(pdfDoc, file) {
+        const page = pdfDoc.addPage();
+        const { width, height } = page.getSize();
+        
+        page.drawText(`File: ${file.name}`, {
+            x: 50,
+            y: height - 100,
+            size: 16,
+            color: PDFLib.rgb(0, 0, 0),
+        });
+        
+        page.drawText(`Type: ${file.type || 'Unknown'}`, {
+            x: 50,
+            y: height - 130,
+            size: 12,
+            color: PDFLib.rgb(0.3, 0.3, 0.3),
+        });
+        
+        page.drawText(`Size: ${this.formatFileSize(file.size)}`, {
+            x: 50,
+            y: height - 150,
+            size: 12,
+            color: PDFLib.rgb(0.3, 0.3, 0.3),
+        });
+        
+        page.drawText(`Last Modified: ${new Date(file.lastModified).toLocaleString()}`, {
+            x: 50,
+            y: height - 170,
+            size: 12,
+            color: PDFLib.rgb(0.3, 0.3, 0.3),
+        });
+        
+        page.drawText('This file type is not directly supported for content extraction.', {
+            x: 50,
+            y: height - 210,
+            size: 12,
+            color: PDFLib.rgb(0.6, 0.3, 0.3),
+        });
+        
+        page.drawText('File information is shown above.', {
+            x: 50,
+            y: height - 230,
+            size: 12,
+            color: PDFLib.rgb(0.6, 0.3, 0.3),
+        });
+    }
+    
+    async addErrorPageToPDF(pdfDoc, file, errorMessage) {
+        const page = pdfDoc.addPage();
+        const { width, height } = page.getSize();
+        
+        page.drawText(`Error processing: ${file.name}`, {
+            x: 50,
+            y: height - 100,
+            size: 16,
+            color: PDFLib.rgb(0.8, 0, 0),
+        });
+        
+        page.drawText(`Error: ${errorMessage}`, {
+            x: 50,
+            y: height - 140,
+            size: 12,
+            color: PDFLib.rgb(0.6, 0, 0),
+        });
+        
+        page.drawText(`File size: ${this.formatFileSize(file.size)}`, {
+            x: 50,
+            y: height - 170,
+            size: 10,
+            color: PDFLib.rgb(0.3, 0.3, 0.3),
+        });
+    }
+    
 
     updateProgress(percentage, message) {
         this.progressFill.style.width = percentage + '%';
