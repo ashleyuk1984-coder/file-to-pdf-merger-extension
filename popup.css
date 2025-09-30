@@ -518,6 +518,22 @@ Make sure disabled buttons don't get the pointer cursor.
   cursor: default;
 }
 
+/* Extension popup sizing */
+body {
+  width: 400px !important;
+  min-height: 500px !important;
+  max-height: 600px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.container {
+  width: 100% !important;
+  max-width: none !important;
+  padding: 16px !important;
+  margin: 0 !important;
+}
+
 /*
 1. Make replaced elements `display: block` by default. (https://github.com/mozdevs/cssremedy/issues/14)
 2. Add `vertical-align: middle` to align replaced elements more sensibly by default. (https://github.com/jensimmons/cssremedy/issues/14#issuecomment-634934210)
